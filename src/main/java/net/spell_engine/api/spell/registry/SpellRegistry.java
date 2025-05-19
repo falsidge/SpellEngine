@@ -1,9 +1,20 @@
 package net.spell_engine.api.spell.registry;
 
+import java.io.ByteArrayOutputStream;
+import java.util.Base64;
+import java.util.List;
+import java.util.stream.Stream;
+import java.util.zip.Deflater;
+import java.util.zip.Inflater;
+
+import org.jetbrains.annotations.Nullable;
+
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
-import com.mojang.serialization.*;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.DataResult;
+
 import net.minecraft.registry.Registry;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.entry.RegistryEntry;
@@ -13,11 +24,6 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.dynamic.Codecs;
 import net.minecraft.world.World;
 import net.spell_engine.api.spell.Spell;
-import org.jetbrains.annotations.Nullable;
-
-import java.util.Base64;
-import java.util.List;
-import java.util.stream.Stream;
 
 public class SpellRegistry {
     /**
@@ -47,14 +53,22 @@ public class SpellRegistry {
     public static final Codec<Spell> NETWORK_CODEC = Codec.STRING.comapFlatMap(
             encoded -> {
                 var bytes = encoded.getBytes();
-                var json = new String(Base64.getDecoder().decode(bytes));
+                String json;
+                try {
+                    json = decompress(Base64.getDecoder().decode(bytes));
+                } catch (Exception e) {
+                    return DataResult.error(null);
+                }
                 var spell = gson.fromJson(json, Spell.class);
                 return DataResult.success(spell);
             },
             spell -> {
                 var json = gson.toJson(spell);
-                var bytes = json.getBytes();
-                return Base64.getEncoder().encodeToString(bytes);
+                try {
+                    return Base64.getEncoder().encodeToString(compress(json));
+                } catch (Exception e) {
+                    return "";
+                }
             }
     );
 
@@ -86,4 +100,39 @@ public class SpellRegistry {
         var registry = manager.get(KEY);
         return registry.streamEntries();
     }
+    
+// Utility method to compress a string using Deflater
+private static byte[] compress(String str) throws Exception {
+    var deflater = new Deflater();
+    deflater.setInput(str.getBytes());
+    deflater.finish();
+
+    try (var outputStream = new ByteArrayOutputStream()) {
+        var buffer = new byte[1024];
+        while (!deflater.finished()) {
+            int count = deflater.deflate(buffer);
+            outputStream.write(buffer, 0, count);
+        }
+        return outputStream.toByteArray();
+    } finally {
+        deflater.end();
+    }
+}
+
+// Utility method to decompress a byte array using Inflater
+private static String decompress(byte[] compressedBytes) throws Exception {
+    var inflater = new Inflater();
+    inflater.setInput(compressedBytes);
+
+    try (var outputStream = new ByteArrayOutputStream()) {
+        var buffer = new byte[1024];
+        while (!inflater.finished()) {
+            int count = inflater.inflate(buffer);
+            outputStream.write(buffer, 0, count);
+        }
+        return outputStream.toString();
+    } finally {
+        inflater.end();
+    }
+}
 }
